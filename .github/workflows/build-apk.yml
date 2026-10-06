@@ -62,8 +62,13 @@ jobs:
           cd android
           KEYSTORE=$(realpath ../release.keystore)
           chmod +x gradlew
+          ./gradlew generateCodegenArtifactsFromSchema \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
+            -Dorg.gradle.configureondemand=false \
+            --stacktrace
           ./gradlew assembleRelease \
             -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
+            -Dorg.gradle.configureondemand=false \
             -Pandroid.injected.signing.store.file="$KEYSTORE" \
             -Pandroid.injected.signing.store.password=vega-release-2026 \
             -Pandroid.injected.signing.key.alias=vega-next \
