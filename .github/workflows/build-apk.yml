@@ -1,0 +1,92 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;28.0.13004108" "cmake;3.22.1"
+
+      - name: Install dependencies
+        run: |
+          rm -f package-lock.json
+          npm install --legacy-peer-deps
+
+      - name: Verify patches applied
+        run: |
+          grep -c "" patches/react-native-video+6.19.2.patch > /dev/null && echo "patches present"
+          node -e "const p=require('./node_modules/react-native-video/package.json');console.log('react-native-video',p.version)"
+
+      - name: Generate signing keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -alias vega-next \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass vega-release-2026 \
+            -keypass vega-release-2026 \
+            -dname "CN=Vega Next, OU=Dev, O=Vega Next, L=NA, ST=NA, C=IN"
+
+      - name: Build release APK
+        run: |
+          cd android
+          KEYSTORE=$(realpath ../release.keystore)
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
+            -Pandroid.injected.signing.store.file="$KEYSTORE" \
+            -Pandroid.injected.signing.store.password=vega-release-2026 \
+            -Pandroid.injected.signing.key.alias=vega-next \
+            -Pandroid.injected.signing.key.password=vega-release-2026 \
+            --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p out-apk
+          find android/app/build/outputs/apk/release -name "*.apk" -not -name "*unsigned*" -exec cp {} out-apk/ \;
+          ls -la out-apk/
+          cp release.keystore out-apk/vega-next-release.keystore
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vega-Next-APK
+          path: out-apk/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-build
+          name: Vega-Next APK build
+          prerelease: true
+          body: |
+            Automated build of this fork.
+
+            **Keystore:** `vega-next-release.keystore` (alias `vega-next`, store/key password `vega-release-2026`)
+            Save it if you want future updates to install over this build without uninstalling.
+          files: out-apk/*.apk
